@@ -1,0 +1,242 @@
+#!/bin/bash
+#
+# --- Infos ---------------------------------------------------------------------------------------
+#
+#	Scriptname		abfahrtsmonitor
+#	Funktion		Abfahrtsmonitor mit aktuellen Abfahrtszeiten fuer beliebige Haltestellen in Dresden
+#
+#	Beschreibung		
+#
+#	benoetigt		bash, wget, (Internetzugang)
+#
+#	Autor			Philipp Thöricht
+#
+#	Status			noch in Arbeit, es fehlt ja noch so einiges
+#	Fehler			siehe unten Probleme
+#
+#	Start			Semesterferien WS 09/10
+#	Stand			Semesterferien SS 10
+#
+#	Version 		0.9
+#
+# Was noch fehlt:
+#	Minuten bis zur Abfahrt (als Option)
+#	Option zur wiederholten Abfrage
+#	eine richtige Hilfe
+#	gibt es Haltestellen mit mehr als 3 Worten? -> s. Uebergabe der Parameter
+#	Angabe eines anderen Ortes inklusive Pruefung, ob er gueltig ist
+#	Unterscheidung ob keine Verbindung zum Internet oder keine zur DVB Seite - in dem Fall Ausweichen auf VVO (keine Ahnung ob die zusammenhaengen)
+#
+# Probleme:
+# ========
+# Gibt die Seite der DVB nur die Zeiten der Fahrplaene wieder, oder die tatsaechlichen Zeiten?
+# 	eventuell Umstieg auf Bezugsstelle der Widgets
+# 	vermutlich sind die Widgets auch nicht aktueller als die Seite der DVB
+# 	die vvo-online Seite gibt jedenfalls (makroskopisch) nichts anderes an also die dvb Seite
+#	Fehlermeldung bei Aufraeumen falls Datei nicht existiert
+#	Bus 400 nach Annaberg-Buchholz, Busbahnhof vom Hauptbahnhof ist als Stadtbus gekennzeichnet und bereitet Probleme
+#
+# -------------------------------------------------------------------------------------------------
+
+# +++ Hilfe ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Syntax: abfahrtsmonitor [Optionen] [Haltestelle]
+#	Optionen:	-a legt die Anzahl an angezeigten Haltestellen fest
+#			-h zeigt diese Hilfe an
+#			-v zeigt die Version des Programms an
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+OPTIONEN="-q --keep-session-cookies --save-cookies cookies --load-cookies cookies -T 10" # --no-cache"	# Timeout von 10 Sek.
+URL="www.dvb.de"
+VERSION="Version: 0.9"
+
+# Defaultwerte:
+anzahlangezeigt="15"		# Anzahl der angezeigten Abfahrten
+ort="Dresden"
+haltestelle="Zellescher Weg"
+laengeUeberschrift=50		# Laenge der Ueberschrift ohne Haltestelle, aber mit Ort, Datum. Uhrzeit
+
+# moegliche Verkehrsmittel:
+# strassenbahn,stadtbus,regionalbus,zug,sbahn,seilschwebebahn,faehre,astrufbus
+# defaultmaessig angezeigte Verkehrsmittel:
+# 	strassenbahn, stadtbus
+
+
+setDatumZeit()
+{
+  datum="$(date +%d.%m.%Y)"
+  uhrzeit="$(date +%H:%M)"	# "%%3A" ist ein "unsafe character" in URL, "%3A" steht fuer den Doppelpunkt und "%%" fuer "%"
+}
+
+eingabeFormatieren()
+{
+  haltestelle="$(echo $haltestelle | sed 's/\b./\U&/g;s/\ ,$/,/')"	# Anfangsbuchstaben gross machen und Leerzeichen vor Komma entfernen
+  let laengeUeberschrift=$laengeUeberschrift+${#haltestelle}	# liest die Laenge des Strings in haltestelle aus und addiert auf die Grundlaenge
+}
+
+# aktuelle Session ID holen:
+getFirstSessionID()
+{
+  wget $OPTIONEN -O index "${URL}/de/Fahrplan/Abfahrtsmonitor"
+  
+  if [ "$(cat index)" == "" ]	# wenn index leer ist, konnte nach 10 sek noch keine Verbindung aufgebaut werden
+    then			# damit gilt die als nicht vorhanden oder zu langsam
+    echo -e "\nKeine oder zu langsame Interverbindung, oder der DVB-Server ist momentan nicht erreichbar!\n"
+    exit 0			# es erfolgt der Abbruch des Programms
+  fi
+
+  grep /de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id index > sessionid
+  sitzungsid="$(sed 's/  <form action="\/de\/Fahrplan\/Abfahrtsmonitor\/haltestellenauswahl.do?uk_id=//;s/#result" id="am_form" method="post" >//' sessionid)"
+}
+
+getFollowingSessionID()
+{
+  grep /de/Fahrplan/Abfahrtsmonitor/abfahrten.do?uk_id abfahrt > nextsessionid
+  naechstesitzungsid="$(sed 's/<form action="\/de\/Fahrplan\/Abfahrtsmonitor\/abfahrten.do?uk_id=//;s/#result" id="filter_form" method="post" >//' nextsessionid)"
+}
+
+# Abfahrtszeiten abholen:
+getAbfahrtszeiten()
+{
+  # htmlseite wird in Datei "abfahrt" gespeichert, da ansonsten ein variabler Dateiname, je nach Haltestelle
+  wget $OPTIONEN -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id=${sitzungsid}%20amform%5Bdatum%5D=${datum}&amform%5Bzeit%5D=${uhrzeit}&amform%5Bstartort%5D=${ort}&amform%5Bstartname%5D=${haltestelle}&amform%5Bstarttype%5D=stop"
+  
+  # Test auf gueltige Haltestelle:
+  if [ -n "$(grep Unbekannte\ Haltestelle\. abfahrt)" ]
+    then
+    echo -e "\nUnbekannte Haltestelle\n"
+    Aufraeumen
+    exit 0
+  fi
+
+  getFollowingSessionID
+
+  # nochmalige Abfrage, diesmal mit eingeschraenkten Verkehrsmitteln
+  wget $OPTIONEN -O abfahrt --post-data 'amform%5Bverkehrsmittelcheckboxen%5D=strassenbahn&amform%5Bverkehrsmittelcheckboxen%5D=stadtbus' "${URL}/de/Fahrplan/Abfahrtsmonitor/abfahrten.do?uk_id=${naechstesitzungsid}" #"
+}
+
+htmlVerarbeiten()
+{
+  # Anfang und Ende des wichtigen Bereichs bestimmen:
+  startline="$(grep -n \"abfahrten_container\" abfahrt)"
+  startline="${startline%%:*}"
+  endline="$(grep -n /de/Fahrplan/Abfahrtsmonitor/spaeter.do abfahrt)"
+  endline="${endline%%:*}"
+
+  cat abfahrt > copy1	# fuer die Zeiten
+  cat abfahrt > copy2	# fuer die Verkehrsmittel
+  cat abfahrt > copy3	# fuer die Linien
+  cat abfahrt > copy4	# fuer die Richtungen
+
+  # Zeiten, Verkehrsmittel, Linien und Richtungen herausschneiden:
+  zeit="$(sed -n ''${startline}','${endline}'p' copy1 | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"	# Uhrzeit; linksbuendig
+  verkehrsmittel="$(sed -n ''${startline}','${endline}'p' copy2 | sed '/^.*pikto_[a-z]-\?[a-z]*\.gif.*$/!d;s/^.*pikto_//g;s/\.gif.*$/ /g;s/\b./\U&/g')"	# ; Pattern ^.*pikto_ wegschneiden ; Klein- in Grossbuchstaben umwandeln
+  linie="$(sed -n ''${startline}','${endline}'p' copy3 | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"	# Linie - bei einstelliger Linie auf 3 Zeichen auffuellen
+  richtung="$(sed -n ''${startline}','${endline}'p' copy4 | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"	# Richtung
+
+  # Kopf der Tabelle:
+  # die 4 obigen Variablen werden in entsprechende Arrays gepackt um sie dann Zeilenweise wieder auszugeben:
+  for (( i=1 ; i <= $anzahlangezeigt ; i++ ))	# Schleife beginnt bei 1, da sonst Rechnung $i-1 bei zeitarray nicht aufgeht
+    do
+    zeitarray[$i]="$(echo ${zeit:$((($i-1)*6)):6})"	# ${String:Position:Laenge}
+    # sind nicht genug Zeiten vorhanden (nachts wenn nichts mehr faehrt), dann Abbruch:
+    if [ "$zeit" == "" ]
+      then
+      break
+    fi
+    verkehrsmittelarray[$i]="$(echo `expr "$verkehrsmittel" : '\([A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ \)'`)"	# -\?B\? fuer die S-Bahn
+    verkehrsmittel="$(echo $verkehrsmittel | sed 's/[A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ //')"
+    linienarray[$i]="$(echo `expr "$linie" : '\([1-9][0-9][0-9]\|[1-9][0-9]\|[1-9]\)'`)" 	#\|S\ [1-9] fuer S-Bahn hinten anfuegen
+    linie="$(echo $linie | sed 's/[1-9][0-9][0-9]\ \|[1-9][0-9]\ \|[1-9]\ //')" 	#\|S\ [1-9]\ fuer S-Bahn hinten anfuegen
+    richtungsarray[$i]="$(echo `expr "$richtung" : '\([A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\)'`)"
+    # Plusse in Leerzeichen zurueckkonvertieren:
+    richtungsarray[$i]=$(echo ${richtungsarray[$i]} | sed 's/+/\ /g')
+    richtung="$(echo $richtung | sed 's/[A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\ //')"
+  done
+}
+
+# Ergebnisse graphisch aufbereiten:
+Ausgabe()
+{
+  #clear
+
+  for (( i=1 ; i<= $laengeUeberschrift ; i++ ))	# Laenge des Unterstriches an Laenge der Ueberschrift anpassen
+    do
+    unterstrich="${unterstrich}="
+  done
+
+  echo -e "\nAbfahrtsmonitor fuer ${haltestelle}, ${ort}, ${datum}, ${uhrzeit}:\n${unterstrich}\n"
+  echo -e "Zeit\tLinie\tVerkehrsmittel\tRichtung"	# Tabellenkopf
+  # Zeilen zusammensetzen:
+  for (( i=1 ; i <= $anzahlangezeigt ; i++ ))
+    do
+    if [ "${zeitarray[$i]}" == "" ]	# Abbruch wenn nicht genug Zeiten vorhanden (zB Nachts)
+      then
+      break
+    fi
+    echo -e "${zeitarray[$i]}\t${linienarray[$i]}\t${verkehrsmittelarray[$i]}\t\t${richtungsarray[$i]}"
+  done
+  echo -e "\n"		# fuer eine abschliessende Leerzeile
+}
+
+Aufraeumen()
+{
+  rm index
+  rm cookies
+  rm sessionid
+  rm nextsessionid 2> /dev/null	# Fehlermeldungen nach /dev/null (Fehler taucht auf, wenn Haltestelle unbekannt)
+  rm abfahrt
+  rm copy1 2> /dev/null
+  rm copy2 2> /dev/null
+  rm copy3 2> /dev/null
+  rm copy4 2> /dev/null
+  unset zeitarray
+  unset linienarray
+  unset richtungsarray
+  unset verkehrsmittelarray
+}
+
+hilfe()	# rudimentaere Hilfe indem die Zeilen 40 bis 47 ausgegeben werden
+{
+  sed -n 40,47p $0
+}
+
+####################################################
+# MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN
+####################################################
+
+# es folgt die Auswertung der uebergebenen Parameter:
+# ===================================================
+while [ "${1}" != ''  ]	# solange ${1} nicht leer ist
+  do
+    [ "${1}" == "-a" ] && shift && anzahlangezeigt="${1}" && shift
+    [ "${1}" == "-h" ] && hilfe && exit 0			# ruft die Hilfe auf
+    [ "${1}" == "-v" ] && echo $VERSION && exit 0		# zeigt Version an und beendet das Programm
+    [ -n "${1}" ] && haltestelle="${1} ${2}" && shift && shift	# uebergibt die eingegebene Haltestelle - muss hier die letzte Option sein - Haltestellen mit Leerzeichen muessen mit Anfuehrungszeichen eingegeben werden
+								# zwei mal Shift falls Haltestelle aus 2 Worten besteht
+done
+
+# normale Abfolge was getan werden muss:
+# ping -c 1 $URL && 
+eingabeFormatieren
+setDatumZeit
+getFirstSessionID
+getAbfahrtszeiten
+htmlVerarbeiten
+Ausgabe
+Aufraeumen 
+
+
+# # Zusatzscript (noch nicht fertig)
+# # dies ist ein Script um die aktuellen Fahrplaene fuer eine bestimmte Haltestelle herunterzuladen und zusammenzufuegen
+# fahrplandownloader()
+# {
+#   wget $OPTIONEN "${URL}/de/Fahrplan/Haltestellenfahrplaene/direkt.do?uk_id=1272223452 hfform%5Bstarttype%5D=stop&hfform%5Bzieltype%5D=stop&hfform%5Bstartort%5D=Dresden&hfform%5Bstartname%5D=zellescher+weg&hfform%5Bdatum%5D=${DATUM}"
+#   grep -n .pdf direkt.do?uk_id=1272223452\ hfform%5Bstarttype%5D=stop\&hfform%5Bzieltype%5D=stop\&hfform%5Bstartort%5D=Dresden\&hfform%5Bstartname%5D=zellescher+weg\&hfform%5Bdatum%5D=${DATUM}
+# 
+#   # Aufraeumen
+# 
+#   rm cookies
+# }
+
+exit 0
