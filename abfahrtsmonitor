@@ -15,7 +15,7 @@
 #	Fehler			siehe unten Probleme
 #
 #	Start			Semesterferien WS 09/10
-#	Stand			Semesterferien SS 10
+#	Stand			Winter 2010
 #
 #	Version 		0.9
 #
@@ -214,9 +214,9 @@ Aufraeumen()
 }
 
 
-####################################################
-# MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN
-####################################################
+#####################################################
+# MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN #
+#####################################################
 
 # es folgt die Auswertung der uebergebenen Parameter:
 # ===================================================
