@@ -15,14 +15,14 @@
 #	Fehler			siehe unten Probleme
 #
 #	Start			Semesterferien WS 09/10
-#	Stand			Winter 2010
+#	Stand			Februar 2011 
 #
 #	Version 		0.9
 #
 # Was noch fehlt:
 #	Minuten bis zur Abfahrt (als Option)
 #	Option zur wiederholten Abfrage
-#	
+#	ordentlicher timeout mit ausgabe
 #	gibt es Haltestellen mit mehr als 3 Worten? -> s. Uebergabe der Parameter
 #	Angabe eines anderen Ortes inklusive Pruefung, ob er gueltig ist
 #	Unterscheidung ob keine Verbindung zum Internet oder keine zur DVB Seite - in dem Fall Ausweichen auf VVO (keine Ahnung ob die zusammenhaengen)
@@ -39,7 +39,7 @@
 # -------------------------------------------------------------------------------------------------
 
 
-OPTIONEN="-q --keep-session-cookies --save-cookies cookies --load-cookies cookies -T 10" # --no-cache"	# Timeout von 10 Sek.
+OPTIONEN="-q --keep-session-cookies --save-cookies cookies --load-cookies cookies -T 100" # --no-cache"	# Timeout von 10 Sek.
 URL="www.dvb.de"
 VERSION="Version: 0.9"
 
@@ -68,13 +68,13 @@ Optionen:
 HELP
 }
 
-setDatumZeit()
+setDateAndTime()
 {
   datum="$(date +%d.%m.%Y)"
   uhrzeit="$(date +%H:%M)"	# "%%3A" ist ein "unsafe character" in URL, "%3A" steht fuer den Doppelpunkt und "%%" fuer "%"
 }
 
-eingabeFormatieren()
+formatInput()
 {
   haltestelle="$(echo $haltestelle | sed 's/\b./\U&/g;s/\ ,$/,/')"	# Anfangsbuchstaben gross machen und Leerzeichen vor Komma entfernen
   let laengeUeberschrift=$laengeUeberschrift+${#haltestelle}	# liest die Laenge des Strings in haltestelle aus und addiert auf die Grundlaenge
@@ -87,8 +87,8 @@ getFirstSessionID()
   
   if [ "$(cat index)" == "" ]	# wenn index leer ist, konnte nach 10 sek noch keine Verbindung aufgebaut werden
     then			# damit gilt die als nicht vorhanden oder zu langsam
-    echo -e "\nKeine oder zu langsame Interverbindung, oder der DVB-Server ist momentan nicht erreichbar!\n"
-    exit 0			# es erfolgt der Abbruch des Programms
+      echo -e "\nKeine oder zu langsame Interverbindung, oder der DVB-Server ist momentan nicht erreichbar!\n"
+      exit 0			# es erfolgt der Abbruch des Programms
   fi
 
   grep /de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id index > sessionid
@@ -102,7 +102,7 @@ getFollowingSessionID()
 }
 
 # Abfahrtszeiten abholen:
-getAbfahrtszeiten()
+getDepartures()
 {
   # htmlseite wird in Datei "abfahrt" gespeichert, da ansonsten ein variabler Dateiname, je nach Haltestelle
   wget $OPTIONEN -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id=${sitzungsid}%20amform%5Bdatum%5D=${datum}&amform%5Bzeit%5D=${uhrzeit}&amform%5Bstartort%5D=${ort}&amform%5Bstartname%5D=${haltestelle}&amform%5Bstarttype%5D=stop"
@@ -110,9 +110,9 @@ getAbfahrtszeiten()
   # Test auf gueltige Haltestelle:
   if [ -n "$(grep Unbekannte\ Haltestelle\. abfahrt)" ]
     then
-    echo -e "\nUnbekannte Haltestelle\n"
-    Aufraeumen
-    exit 0
+      echo -e "\nUnbekannte Haltestelle\n"
+      Aufraeumen
+      exit 0
   fi
 
   getFollowingSessionID
@@ -121,7 +121,29 @@ getAbfahrtszeiten()
   wget $OPTIONEN -O abfahrt --post-data 'amform%5Bverkehrsmittelcheckboxen%5D=strassenbahn&amform%5Bverkehrsmittelcheckboxen%5D=stadtbus' "${URL}/de/Fahrplan/Abfahrtsmonitor/abfahrten.do?uk_id=${naechstesitzungsid}" #"
 }
 
-htmlVerarbeiten()
+calcRemainingTime()	# doesnt work correct around 0 o'clock
+{
+  if [ $(( ${timeArray[$i]%%:*} - ${uhrzeit%%:*} )) -eq 0 ]	# same hour
+    then
+      remainingTime[$i]="$(( ${timeArray[$i]##*:} - ${uhrzeit##*:} ))"
+    else							# 1,2,... hour later
+      if [ $(( ${timeArray[$i]##*:} - ${uhrzeit##*:} )) -lt 0 ]
+	then
+	  minutes="$(( 60 + $(( ${timeArray[$i]##*:} - ${uhrzeit##*:} )) ))"
+	  if [ $(( ${timeArray[$i]%%:*} - ${uhrzeit%%:*} )) -lt 0 ]
+	    then
+	      hours="$(( 24 + $(( ${timeArray[$i]%%:*} - ${uhrzeit%%:*} )) ))"
+	      remainingTime[$i]="$hours:$minutes"
+	    else
+	      remainingTime[$i]="$(( ${timeArray[$i]%%:*} - ${uhrzeit%%:*} )):$minutes"
+	  fi
+	else
+	  remainingTime[$i]="$(( ${timeArray[$i]%%:*} - ${uhrzeit%%:*} )):$(( ${timeArray[$i]##*:} - ${uhrzeit##*:} ))"
+      fi
+  fi
+}
+
+processHtml()
 {
   # Anfang und Ende des wichtigen Bereichs bestimmen:
   startline="$(grep -n \"abfahrten_container\" abfahrt)"
@@ -149,11 +171,11 @@ htmlVerarbeiten()
   # die 4 obigen Variablen werden in entsprechende Arrays gepackt um sie dann Zeilenweise wieder auszugeben:
   for (( i=1 ; i <= $anzahlangezeigt ; i++ ))	# Schleife beginnt bei 1, da sonst Rechnung $i-1 bei zeitarray nicht aufgeht
     do
-    zeitarray[$i]="$(echo ${zeit:$((($i-1)*6)):6})"	# ${String:Position:Laenge}
+    timeArray[$i]="$(echo ${zeit:$((($i-1)*6)):6})"	# ${String:Position:Laenge}
     # sind nicht genug Zeiten vorhanden (nachts wenn nichts mehr faehrt), dann Abbruch:
     if [ "$zeit" == "" ]
       then
-      break
+	break
     fi
     verkehrsmittelarray[$i]="$(echo `expr "$verkehrsmittel" : '\([A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ \)'`)"	# -\?B\? fuer die S-Bahn
     verkehrsmittel="$(echo $verkehrsmittel | sed 's/[A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ //')"
@@ -163,17 +185,19 @@ htmlVerarbeiten()
     # Plusse in Leerzeichen zurueckkonvertieren:
     richtungsarray[$i]=$(echo ${richtungsarray[$i]} | sed 's/+/\ /g')
     richtung="$(echo $richtung | sed 's/[A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\ //')"
+    #calcRemainingTime
   done
 
   #echo ${zeitarray[@]}
   #echo ${verkehrsmittelarray[@]}
   #echo ${linienarray[@]}
   #echo ${richtungsarray[@]}
+  #echo ${remainingTime[@]}
 
 }
 
 # Ergebnisse graphisch aufbereiten:
-Ausgabe()
+output()
 {
   #clear
 
@@ -183,20 +207,20 @@ Ausgabe()
   done
 
   echo -e "\nAbfahrtsmonitor fuer ${haltestelle}, ${ort}, ${datum}, ${uhrzeit}:\n${unterstrich}\n"
-  echo -e "Zeit\tLinie\tVerkehrsmittel\tRichtung"	# Tabellenkopf
+  echo -e "Zeit\tLinie\tVerkehrsmittel\tRichtung\tAbfahrt in"	# Tabellenkopf
   # Zeilen zusammensetzen:
   for (( i=1 ; i <= $anzahlangezeigt ; i++ ))
     do
-    if [ "${zeitarray[$i]}" == "" ]	# Abbruch wenn nicht genug Zeiten vorhanden (zB Nachts)
+    if [ "${timeArray[$i]}" == "" ]	# Abbruch wenn nicht genug Zeiten vorhanden (zB Nachts)
       then
-      break
+	break
     fi
-    echo -e "${zeitarray[$i]}\t${linienarray[$i]}\t${verkehrsmittelarray[$i]}\t\t${richtungsarray[$i]}"
+    echo -e "${timeArray[$i]}\t${linienarray[$i]}\t${verkehrsmittelarray[$i]}\t\t${richtungsarray[$i]}" #\t${remainingTime[$i]}"
   done
-  echo -e "\n"		# fuer eine abschliessende Leerzeile
+  echo -e "\n"
 }
 
-Aufraeumen()
+clearDir()
 {
   rm index
   rm cookies
@@ -231,13 +255,13 @@ done
 
 # normale Abfolge was getan werden muss:
 # ping -c 1 $URL && 
-eingabeFormatieren
-setDatumZeit
+formatInput
+setDateAndTime
 getFirstSessionID
-getAbfahrtszeiten
-htmlVerarbeiten
-Ausgabe
-Aufraeumen 
+getDepartures
+processHtml
+output
+clearDir
 
 
 # # Zusatzscript (noch nicht fertig)
