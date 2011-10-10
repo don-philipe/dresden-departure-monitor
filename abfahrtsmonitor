@@ -1,19 +1,5 @@
 #!/bin/bash
 #
-# --- Infos ---------------------------------------------------------------------------------------
-#
-#	Scriptname		abfahrtsmonitor
-#	Funktion		Abfahrtsmonitor mit aktuellen Abfahrtszeiten fuer beliebige Haltestellen in Dresden
-#
-#	benoetigt		bash, wget, (Internetzugang)
-#
-#	Autor			Philipp Thöricht
-#
-#	Start			02.2010
-#	Stand			09.2011 
-#
-#	Version 		0.9
-#
 # Was noch fehlt:
 #	Minuten bis zur Abfahrt (als Option)
 #	Option zur wiederholten Abfrage
@@ -39,14 +25,14 @@ URL="www.dvb.de"
 VERSION="Version: 0.9"
 
 # default:
-anzahlangezeigt="15"		# Anzahl der angezeigten Abfahrten
+displayed="15"		# number of displayed departures
 city="Dresden"
 stop="Zellescher Weg"
 headlinelength=50		# length of the headline without stop
 
-# moegliche Verkehrsmittel:
+# possible vehicles:
 # strassenbahn,stadtbus,regionalbus,zug,sbahn,seilschwebebahn,faehre,astrufbus
-# defaultmaessig angezeigte Verkehrsmittel:
+# default:
 # 	strassenbahn, stadtbus
 
 
@@ -54,59 +40,41 @@ helptext()
 {
   cat <<HELP
 
-Syntax: abfahrtsmonitor [Optionen] [Haltestelle]
-Abfahrtszeiten einer Haltestelle fuer die Dresdener Verkehrsbetriebe anzeigen
+Syntax: abfahrtsmonitor [options] [stop]
+Shows the departuretimes, routes, vehicles and directions for a given stop in Dresden.
 
 Optionen:	
-	-a 	legt die Anzahl an angezeigten Haltestellen fest (Standart: 15)
-	-h	zeigt diese Hilfe an
-	-v	gibt die Version aus
+	-d 	changes the number of displayed departures (default: 15)
+	-h	shows this helptext
+	-v	returns the scriptversion
 HELP
 }
 
 
-setDateAndTime()
+	
+getSessionID()
 {
-	datum="$(date +%d.%m.%Y)"
-	uhrzeit="$(date +%H:%M)"
-}
-
-
-formatInput()
-{
-	stop="$(echo $stop | sed 's/\b./\U&/g;s/\ ,$/,/')"	# Anfangsbuchstaben gross machen und Leerzeichen vor Komma entfernen
-	let headlinelength=$headlinelength+${#stop}	# liest die Laenge des Strings in haltestelle aus und addiert auf die Grundlaenge
-}
-
-
-getFirstSessionID()
-{
-	wget $OPTIONS -O index "${URL}/de/Fahrplan/Abfahrtsmonitor"
-  
-	if [ "$(cat index)" == "" ]	# wenn index leer ist, konnte nach 10 sek noch keine Verbindung aufgebaut werden
-	then			# damit gilt die als nicht vorhanden oder zu langsam
-		echo -e "\nKeine oder zu langsame Interverbindung, oder der DVB-Server ist momentan nicht erreichbar!\n"
-		clearDir
-		exit 0
-	fi
-
-	grep /de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id index > sessionid
+	grep /de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id abfahrt > sessionid
 	sessionid="$(sed 's/  <form action="\/de\/Fahrplan\/Abfahrtsmonitor\/haltestellenauswahl.do?uk_id=//;s/#result" id="am_form" method="post" >//' sessionid)"
 }
 
 
-getFollowingSessionID()
+clearDir()
 {
-	grep /de/Fahrplan/Abfahrtsmonitor/abfahrten.do?uk_id abfahrt > nextsessionid
-	nextsessionid="$(sed 's/<form action="\/de\/Fahrplan\/Abfahrtsmonitor\/abfahrten.do?uk_id=//;s/#result" id="filter_form" method="post" >//' nextsessionid)"
+	rm abfahrt
+	rm cookies
+	rm sessionid
+	#unset timearray
+	#unset routearray
+	#unset directionarray
+	#unset vehiclelarray
 }
 
 
 getDepartures()
 {
-  	wget $OPTIONS -O abfahrt --post-data "amform%5Bdatum%5D=${datum}&amform%5Bzeit%5D=${uhrzeit}&amform%5Bstartort%5D=${city}&amform%5Bstartname%5D=${stop}&amform%5Bstarttype%5D=stop" "${URL}/de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id=${sessionid}" #%20
-	#cat abfahrt
-	# Test auf gueltige Haltestelle:
+  	wget $OPTIONS -O abfahrt --post-data "amform%5Bdatum%5D=${cur_date}&amform%5Bzeit%5D=${cur_time}&amform%5Bstartort%5D=${city}&amform%5Bstartname%5D=${stop}&amform%5Bstarttype%5D=stop" "${URL}/de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id=${sessionid}" #%20
+	# test if stop is valid:
 	if [ -n "$(grep Unbekannte\ Haltestelle\. abfahrt)" ]
 	then
 		echo -e "\nUnbekannte Haltestelle\n"
@@ -114,31 +82,47 @@ getDepartures()
 		exit 0
 	fi
 
-	getFollowingSessionID
+	getSessionID
 
-	# nochmalige Abfrage, diesmal mit eingeschraenkten Verkehrsmitteln
-	wget $OPTIONS -O abfahrt --post-data 'amform%5Bverkehrsmittelcheckboxen%5D=strassenbahn&amform%5Bverkehrsmittelcheckboxen%5D=stadtbus' "${URL}/de/Fahrplan/Abfahrtsmonitor/abfahrten.do?uk_id=${nextsessionid}"
+	# getting departuretimes again with only two vehicles
+	wget $OPTIONS -O abfahrt --post-data 'amform%5Bverkehrsmittelcheckboxen%5D=strassenbahn&amform%5Bverkehrsmittelcheckboxen%5D=stadtbus' "${URL}/de/Fahrplan/Abfahrtsmonitor/abfahrten.do?uk_id=${sessionid}"
 }
 
 
-calcRemainingTime()	# doesnt work correct around 0 o'clock
+clearTime() 
 {
-	if [ $(( ${timearray[$i]%%:*} - ${uhrzeit%%:*} )) -eq 0 ]	# same hour
+	TMP="${1}"
+	if (test $(echo ${TMP} | cut -c 1) == "0")
 	then
-		remainingTime[$i]="$(( ${timearray[$i]##*:} - ${uhrzeit##*:} ))"
+		TMP=$(echo ${TMP} | cut -c 2)
+	fi
+	echo ${TMP}
+}
+
+
+calcRemainingTime()	# doesnt work correct around 0 o'clock and between hours
+{
+	dep_time_h=$(clearTime ${timearray[$i]%%:*})
+	cur_time_h=$(clearTime ${cur_time%%:*})
+	dep_time_m=$(clearTime ${timearray[$i]##*:})
+	cur_time_m=$(clearTime ${cur_time##*:})
+
+	if [ $(( $dep_time_h - $cur_time_h )) -eq 0 ]	# same hour
+	then
+		remaining_time[$i]="$(( $dep_time_m - $cur_time_m ))"
 	else							# 1,2,... hour later
-		if [ $(( ${timearray[$i]##*:} - ${uhrzeit##*:} )) -lt 0 ]
-		then
-			minutes="$(( 60 + $(( ${timearray[$i]##*:} - ${uhrzeit##*:} )) ))"
-			if [ $(( ${timearray[$i]%%:*} - ${uhrzeit%%:*} )) -lt 0 ]
-			then
-				hours="$(( 24 + $(( ${timearray[$i]%%:*} - ${uhrzeit%%:*} )) ))"
-				remainingTime[$i]="$hours:$minutes"
+		if [ $(( $dep_time_m - $cur_time_m )) -lt 0 ]
+		then	#remaining_time not greater than 59 min
+			minutes="$(( 60 + $(( $dep_time_m - $cur_time_m )) ))"
+			if [ $(( $dep_time_h - $cur_time_h )) -lt 0 ]
+			then	# for daychange
+				hours="$(( 24 + $(( $dep_time_h - $cur_time_h )) ))"
+				remaining_time[$i]="$hours:$minutes"
 			else
-				remainingTime[$i]="$(( ${timearray[$i]%%:*} - ${uhrzeit%%:*} )):$minutes"
+				remaining_time[$i]=$minutes
 			fi
-		else
-			remainingTime[$i]="$(( ${timearray[$i]%%:*} - ${uhrzeit%%:*} )):$(( ${timearray[$i]##*:} - ${uhrzeit##*:} ))"
+		else	# remaining_time greater than 59 min
+			remaining_time[$i]="$(( $dep_time_h - $cur_time_h )):$(( $dep_time_m - $cur_time_m ))"
 		fi
 	fi
 }
@@ -151,28 +135,20 @@ processHtml()
 	endline="$(grep -n /de/Fahrplan/Abfahrtsmonitor/spaeter.do abfahrt)"
 	endline="${endline%%:*}"
 
-	cat abfahrt > copy1	# fuer die Zeiten
-	cat abfahrt > copy2	# fuer die Verkehrsmittel
-	cat abfahrt > copy3	# fuer die Linien
-	cat abfahrt > copy4	# fuer die Richtungen
-
-	# Zeiten, Verkehrsmittel, Linien und Richtungen herausschneiden:
-	time="$(sed -n ''${startline}','${endline}'p' copy1 | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"	# Uhrzeit; linksbuendig
-	vehicle="$(sed -n ''${startline}','${endline}'p' copy2 | sed '/^.*pikto_[a-z]-\?[a-z]*\.gif.*$/!d;s/^.*pikto_//g;s/\.gif.*$/ /g;s/\b./\U&/g')"	# ; Pattern ^.*pikto_ wegschneiden ; Klein- in Grossbuchstaben umwandeln
-	route="$(sed -n ''${startline}','${endline}'p' copy3 | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"	# Linie - bei einstelliger Linie auf 3 Zeichen auffuellen
-	direction="$(sed -n ''${startline}','${endline}'p' copy4 | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"	# Richtung
+	time="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"	# Uhrzeit; linksbuendig
+	vehicle="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/^.*pikto_[a-z]-\?[a-z]*\.gif.*$/!d;s/^.*pikto_//g;s/\.gif.*$/ /g;s/\b./\U&/g')"	# ; Pattern ^.*pikto_ wegschneiden ; Klein- in Grossbuchstaben umwandeln
+	route="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"	# Linie - bei einstelliger Linie auf 3 Zeichen auffuellen
+	direction="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"	# Richtung
 
 	#echo $time
 	#echo $vehicle
 	#echo $route
 	#echo $direction
 
-	# Kopf der Tabelle:
-	# die 4 obigen Variablen werden in entsprechende Arrays gepackt um sie dann Zeilenweise wieder auszugeben:
-	for (( i=1 ; i <= $anzahlangezeigt ; i++ ))	# Schleife beginnt bei 1, da sonst Rechnung $i-1 bei zeitarray nicht aufgeht
+	for (( i=1 ; i <= $displayed ; i++ ))	# loop starts with 1 for the calculation two lines below
 	do
 		timearray[$i]="$(echo ${time:$((($i-1)*6)):6})"	# ${String:Position:Laenge}
-		# sind nicht genug Zeiten vorhanden (nachts wenn nichts mehr faehrt), dann Abbruch:
+		
 		if [ "$time" == "" ]
 		then
 			break
@@ -182,7 +158,6 @@ processHtml()
 		routearray[$i]="$(echo `expr "$route" : '\([1-9][0-9][0-9]\|[1-9][0-9]\|[1-9]\)'`)" 	#\|S\ [1-9] fuer S-Bahn hinten anfuegen
 		route="$(echo $route | sed 's/[1-9][0-9][0-9]\ \|[1-9][0-9]\ \|[1-9]\ //')" 	#\|S\ [1-9]\ fuer S-Bahn hinten anfuegen
 		directionarray[$i]="$(echo `expr "$direction" : '\([A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\)'`)"
-		# Plusse in Leerzeichen zurueckkonvertieren:
 		directionarray[$i]=$(echo ${directionarray[$i]} | sed 's/+/\ /g')
 		direction="$(echo $direction | sed 's/[A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\ //')"
 		calcRemainingTime
@@ -192,8 +167,7 @@ processHtml()
 	#echo ${vehiclearray[@]}
 	#echo ${routearray[@]}
 	#echo ${directionarray[@]}
-	#echo ${remainingTime[@]}
-
+	#echo ${remaining_time[@]}
 }
 
 
@@ -206,54 +180,67 @@ output()
 		underline="${underline}="
 	done
 
-	echo -e "\nAbfahrtsmonitor fuer ${stop}, ${city}, ${datum}, ${uhrzeit}:\n${underline}\n"
-	echo -e "Zeit\tLinie\tVerkehrsmittel\tRichtung\tAbfahrt in"	# Tabellenkopf
-	# Zeilen zusammensetzen:
-	for (( i=1 ; i <= $anzahlangezeigt ; i++ ))
+	echo -e "\nAbfahrtsmonitor fuer ${stop}, ${city}, ${cur_date}, ${cur_time}:\n${underline}\n"
+	echo -e "Zeit\tLinie\tVerkehrsmittel\tRichtung\t\tAbfahrt in"	# tableheader
+	# output lines:
+	for (( i=1 ; i <= $displayed ; i++ ))
 	do
-		if [ "${timearray[$i]}" == "" ]	# Abbruch wenn nicht genug Zeiten vorhanden (zB Nachts)
+		if [ "${timearray[$i]}" == "" ]	# break loop if not enough departures
 		then
 			break
 		fi
-		echo -e "${timearray[$i]}\t${routearray[$i]}\t${vehiclearray[$i]}\t\t${directionarray[$i]}\t${remainingTime[$i]}"
+		
+		tabs="\t\t"
+		if [ ${#directionarray[$i]} -lt 8 ]
+		then
+			tabs="\t\t\t"
+		fi
+		if [ ${#directionarray[$i]} -gt 15 ]
+		then
+			tabs="\t"
+		fi
+		#echo ${#directionarray[$i]}
+		#echo $tabs
+		echo -e "${timearray[$i]}\t${routearray[$i]}\t${vehiclearray[$i]}\t\t${directionarray[$i]}$tabs${remaining_time[$i]}"
 	done
 	echo -e "\n"
 }
 
-clearDir()
-{
-	rm index
-	rm cookies
-	rm sessionid
-	rm nextsessionid 2> /dev/null	# Fehler taucht auf, wenn Haltestelle unbekannt
-	rm abfahrt
-	rm copy1 2> /dev/null
-	rm copy2 2> /dev/null
-	rm copy3 2> /dev/null
-	rm copy4 2> /dev/null
-	unset timearray
-	unset routearray
-	unset directionarray
-	unset vehiclelarray
-}
 
 
-#####################################################
-# MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN +++ MAIN #
-#####################################################
+######################
+# Script starts here #
+######################
 
 while [ "${1}" != ''  ]
 do
-	[ "${1}" == "-a" ] && shift && anzahlangezeigt="${1}" && shift
+	[ "${1}" == "-d" ] && shift && displayed="${1}" && shift
 	[ "${1}" == "-h" ] && helptext && exit 0
 	[ "${1}" == "-v" ] && echo $VERSION && exit 0
 	[ -n "${1}" ] && stop="${1} ${2}" && shift && shift	# 2x shift for stops containing two words
 done
 
 # ping -c 1 $URL && 
-formatInput
-setDateAndTime
-getFirstSessionID
+
+# format input:
+stop="$(echo $stop | sed 's/\b./\U&/g;s/\ ,$/,/')"	# set capital letters and remove whitespace in front of comma
+let headlinelength=$headlinelength+${#stop}	# adds the length of the stopname to the headlinelength
+
+# set date and time:
+cur_date="$(date +%d.%m.%Y)"
+cur_time="$(date +%H:%M)"
+
+# get website for initial sessionid:
+wget $OPTIONS -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor"
+  
+if [ "$(cat abfahrt)" == "" ]
+then
+	echo -e "\nKeine oder zu langsame Interverbindung, oder der DVB-Server ist momentan nicht erreichbar!\n"
+	clearDir
+	exit 0
+fi
+
+getSessionID
 getDepartures
 processHtml
 output
