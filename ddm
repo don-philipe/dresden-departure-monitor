@@ -1,33 +1,46 @@
 #!/bin/bash
 #
-# Was noch fehlt:
-#	Minuten bis zur Abfahrt (als Option)
-#	Option zur wiederholten Abfrage
-#	ordentlicher timeout mit ausgabe
-#	gibt es Haltestellen mit mehr als 3 Worten? -> s. Uebergabe der Parameter
-#	Angabe eines anderen Ortes inklusive Pruefung, ob er gueltig ist
-#	Unterscheidung ob keine Verbindung zum Internet oder keine zur DVB Seite - in dem Fall Ausweichen auf VVO (keine Ahnung ob die zusammenhaengen)
+### LICENSE ###
+# ddm - dresden-departure-monitor:
+# getting departures for stops in Dresden
 #
+# Copyright (C) 2011 don_philipe - don_philipe@gmx.de
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <http://www.gnu.org/licenses/>.
+###
+#
+# ++++++++++++++++++++++++
+# Developer informations:
 # Probleme:
 # ========
 # Gibt die Seite der DVB nur die Zeiten der Fahrplaene wieder, oder die tatsaechlichen Zeiten?
 # 	eventuell Umstieg auf Bezugsstelle der Widgets
 # 	vermutlich sind die Widgets auch nicht aktueller als die Seite der DVB
 # 	die vvo-online Seite gibt jedenfalls (makroskopisch) nichts anderes an also die dvb Seite
-#	Fehlermeldung bei Aufraeumen falls Datei nicht existiert
 #	Bus 400 nach Annaberg-Buchholz, Busbahnhof vom Hauptbahnhof ist als Stadtbus gekennzeichnet und bereitet Probleme
-#
-# -------------------------------------------------------------------------------------------------
+#	gibt es Haltestellen mit mehr als 3 Worten? -> s. Uebergabe der Parameter
+# ++++++++++++++++++++++++
 
 
 OPTIONS="-q --keep-session-cookies --save-cookies cookies --load-cookies cookies -T 100"
 URL="www.dvb.de"
-VERSION="Version: 0.9"
+VERSION="Version: 1.0"
 
 # default:
 displayed="15"		# number of displayed departures
 city="Dresden"
-stop="Zellescher Weg"
+stop=""
 headlinelength=50		# length of the headline without stop
 
 # possible vehicles:
@@ -44,9 +57,9 @@ Syntax: abfahrtsmonitor [options] [stop]
 Shows the departuretimes, routes, vehicles and directions for a given stop in Dresden.
 
 Optionen:	
-	-d 	changes the number of displayed departures (default: 15)
-	-h	shows this helptext
-	-v	returns the scriptversion
+	-d 		changes the number of displayed departures (default: 15)
+	-h, --help	shows this helptext
+	-v, --verion	returns the scriptversion
 HELP
 }
 
@@ -77,7 +90,7 @@ getDepartures()
 	# test if stop is valid:
 	if [ -n "$(grep Unbekannte\ Haltestelle\. abfahrt)" ]
 	then
-		echo -e "\nUnbekannte Haltestelle\n"
+		echo -e "\nUnknown stop!\n"
 		clearDir
 		exit 0
 	fi
@@ -180,8 +193,8 @@ output()
 		underline="${underline}="
 	done
 
-	echo -e "\nAbfahrtsmonitor fuer ${stop}, ${city}, ${cur_date}, ${cur_time}:\n${underline}\n"
-	echo -e "Zeit\tLinie\tVerkehrsmittel\tRichtung\t\tAbfahrt in"	# tableheader
+	echo -e "\nDeparturemonitor for ${stop}, ${city}, ${cur_date}, ${cur_time}:\n${underline}\n"
+	echo -e "Time\tRoute\tVehicle\t\tDirection\t\tRemaining time"	# tableheader
 	# output lines:
 	for (( i=1 ; i <= $displayed ; i++ ))
 	do
@@ -214,9 +227,9 @@ output()
 
 while [ "${1}" != ''  ]
 do
-	[ "${1}" == "-d" ] && shift && displayed="${1}" && shift
-	[ "${1}" == "-h" ] && helptext && exit 0
-	[ "${1}" == "-v" ] && echo $VERSION && exit 0
+	[ "${1}" == -d ] && shift && displayed="${1}" && shift
+	[ "${1}" == -h ] || [ "${1}" == --help ] && helptext && exit 0
+	[ "${1}" == -v ] || [ "${1}" == --version ] && echo $VERSION && exit 0
 	[ -n "${1}" ] && stop="${1} ${2}" && shift && shift	# 2x shift for stops containing two words
 done
 
@@ -235,7 +248,7 @@ wget $OPTIONS -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor"
   
 if [ "$(cat abfahrt)" == "" ]
 then
-	echo -e "\nKeine oder zu langsame Interverbindung, oder der DVB-Server ist momentan nicht erreichbar!\n"
+	echo -e "\nCant reach the server!\n"
 	clearDir
 	exit 0
 fi
