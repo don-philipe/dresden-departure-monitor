@@ -53,7 +53,7 @@ helptext()
 {
   cat <<HELP
 
-Syntax: abfahrtsmonitor [options] [stop]
+Syntax: ddm [options] [stop]
 Shows the departuretimes, routes, vehicles and directions for a given stop in Dresden.
 
 Optionen:	
@@ -227,9 +227,9 @@ output()
 
 while [ "${1}" != ''  ]
 do
-	[ "${1}" == -d ] && shift && displayed="${1}" && shift
-	[ "${1}" == -h ] || [ "${1}" == --help ] && helptext && exit 0
-	[ "${1}" == -v ] || [ "${1}" == --version ] && echo $VERSION && exit 0
+	[ "${1}" == "-d" ] && shift && displayed="${1}" && shift
+	[ "${1}" == "-h" ] || [ "${1}" == "--help" ] && helptext && exit 0
+	[ "${1}" == "-v" ] || [ "${1}" == "--version" ] && echo $VERSION && exit 0
 	[ -n "${1}" ] && stop="${1} ${2}" && shift && shift	# 2x shift for stops containing two words
 done
 
