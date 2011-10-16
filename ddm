@@ -20,25 +20,16 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 ###
 #
-# ++++++++++++++++++++++++
-# Developer informations:
-# Probleme:
-# ========
-# Gibt die Seite der DVB nur die Zeiten der Fahrplaene wieder, oder die tatsaechlichen Zeiten?
-# 	eventuell Umstieg auf Bezugsstelle der Widgets
-# 	vermutlich sind die Widgets auch nicht aktueller als die Seite der DVB
-# 	die vvo-online Seite gibt jedenfalls (makroskopisch) nichts anderes an also die dvb Seite
-#	Bus 400 nach Annaberg-Buchholz, Busbahnhof vom Hauptbahnhof ist als Stadtbus gekennzeichnet und bereitet Probleme
-#	gibt es Haltestellen mit mehr als 3 Worten? -> s. Uebergabe der Parameter
-# ++++++++++++++++++++++++
 
 
 OPTIONS="-q --keep-session-cookies --save-cookies cookies --load-cookies cookies -T 100"
 URL="www.dvb.de"
-VERSION="Version: 1.0"
+VERSION="Version: 1.1"
 
 # default:
-displayed="15"		# number of displayed departures
+displayed=15		# number of displayed departures
+loop=false
+loop_sec=30		# repeat getting departuretimes every x seconds
 city="Dresden"
 stop=""
 headlinelength=50		# length of the headline without stop
@@ -56,16 +47,18 @@ helptext()
 Syntax: ddm [options] [stop]
 Shows the departuretimes, routes, vehicles and directions for a given stop in Dresden.
 
-Optionen:	
-	-d 		changes the number of displayed departures (default: 15)
+Options:	
+	-d num		changes the number of displayed departures (default: 15)
 	-h, --help	shows this helptext
-	-v, --verion	returns the scriptversion
+	-l [sec]	get departuretimes repeatedly every 30 second or add an 
+			own interval in seconds (greater than 0)
+	-v, --version	returns the scriptversion
 HELP
 }
 
 
 	
-getSessionID()
+getSessionId()
 {
 	grep /de/Fahrplan/Abfahrtsmonitor/haltestellenauswahl.do?uk_id abfahrt > sessionid
 	sessionid="$(sed 's/  <form action="\/de\/Fahrplan\/Abfahrtsmonitor\/haltestellenauswahl.do?uk_id=//;s/#result" id="am_form" method="post" >//' sessionid)"
@@ -95,7 +88,7 @@ getDepartures()
 		exit 0
 	fi
 
-	getSessionID
+	getSessionId
 
 	# getting departuretimes again with only two vehicles
 	wget $OPTIONS -O abfahrt --post-data 'amform%5Bverkehrsmittelcheckboxen%5D=strassenbahn&amform%5Bverkehrsmittelcheckboxen%5D=stadtbus' "${URL}/de/Fahrplan/Abfahrtsmonitor/abfahrten.do?uk_id=${sessionid}"
@@ -113,12 +106,19 @@ clearTime()
 }
 
 
-calcRemainingTime()	# doesnt work correct around 0 o'clock and between hours
+calcRemainingTime()	# doesnt work correct around 0 o'clock
 {
 	dep_time_h=$(clearTime ${timearray[$i]%%:*})
 	cur_time_h=$(clearTime ${cur_time%%:*})
 	dep_time_m=$(clearTime ${timearray[$i]##*:})
 	cur_time_m=$(clearTime ${cur_time##*:})
+
+	if [ $dep_time_h -lt $cur_time_h ]
+	then
+		timeshift=24
+	else
+		timeshift=0
+	fi
 
 	if [ $(( $dep_time_h - $cur_time_h )) -eq 0 ]	# same hour
 	then
@@ -129,13 +129,13 @@ calcRemainingTime()	# doesnt work correct around 0 o'clock and between hours
 			minutes="$(( 60 + $(( $dep_time_m - $cur_time_m )) ))"
 			if [ $(( $dep_time_h - $cur_time_h )) -lt 0 ]
 			then	# for daychange
-				hours="$(( 24 + $(( $dep_time_h - $cur_time_h )) ))"
+				hours="$(( 23 + $(( $dep_time_h - $cur_time_h )) ))"
 				remaining_time[$i]="$hours:$minutes"
 			else
 				remaining_time[$i]=$minutes
 			fi
 		else	# remaining_time greater than 59 min
-			remaining_time[$i]="$(( $dep_time_h - $cur_time_h )):$(( $dep_time_m - $cur_time_m ))"
+			remaining_time[$i]="$(( $timeshift + $dep_time_h - $cur_time_h )):$(( $dep_time_m - $cur_time_m ))"
 		fi
 	fi
 }
@@ -148,10 +148,10 @@ processHtml()
 	endline="$(grep -n /de/Fahrplan/Abfahrtsmonitor/spaeter.do abfahrt)"
 	endline="${endline%%:*}"
 
-	time="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"	# Uhrzeit; linksbuendig
-	vehicle="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/^.*pikto_[a-z]-\?[a-z]*\.gif.*$/!d;s/^.*pikto_//g;s/\.gif.*$/ /g;s/\b./\U&/g')"	# ; Pattern ^.*pikto_ wegschneiden ; Klein- in Grossbuchstaben umwandeln
-	route="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"	# Linie - bei einstelliger Linie auf 3 Zeichen auffuellen
-	direction="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"	# Richtung
+	time="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"	# time; left-aligned
+	vehicle="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/^.*pikto_[a-z]-\?[a-z]*\.gif.*$/!d;s/^.*pikto_//g;s/\.gif.*$/ /g;s/\b./\U&/g')"
+	route="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"
+	direction="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"
 
 	#echo $time
 	#echo $vehicle
@@ -166,10 +166,10 @@ processHtml()
 		then
 			break
 		fi
-		vehiclearray[$i]="$(echo `expr "$vehicle" : '\([A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ \)'`)"	# -\?B\? fuer die S-Bahn
+		vehiclearray[$i]="$(echo `expr "$vehicle" : '\([A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ \)'`)"	# -\?B\? for S-Bahn
 		vehicle="$(echo $vehicle | sed 's/[A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ //')"
-		routearray[$i]="$(echo `expr "$route" : '\([1-9][0-9][0-9]\|[1-9][0-9]\|[1-9]\)'`)" 	#\|S\ [1-9] fuer S-Bahn hinten anfuegen
-		route="$(echo $route | sed 's/[1-9][0-9][0-9]\ \|[1-9][0-9]\ \|[1-9]\ //')" 	#\|S\ [1-9]\ fuer S-Bahn hinten anfuegen
+		routearray[$i]="$(echo `expr "$route" : '\([1-9][0-9][0-9]\|[1-9][0-9]\|[1-9]\)'`)" 	#\|S\ [1-9] - add for S-Bahn at the end
+		route="$(echo $route | sed 's/[1-9][0-9][0-9]\ \|[1-9][0-9]\ \|[1-9]\ //')" 	#\|S\ [1-9]\ - add for S-Bahn at the end
 		directionarray[$i]="$(echo `expr "$direction" : '\([A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\)'`)"
 		directionarray[$i]=$(echo ${directionarray[$i]} | sed 's/+/\ /g')
 		direction="$(echo $direction | sed 's/[A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\ //')"
@@ -186,13 +186,6 @@ processHtml()
 
 output()
 {
-	#clear
-
-	for (( i=1 ; i<= $headlinelength ; i++ ))
-	do
-		underline="${underline}="
-	done
-
 	echo -e "\nDeparturemonitor for ${stop}, ${city}, ${cur_date}, ${cur_time}:\n${underline}\n"
 	echo -e "Time\tRoute\tVehicle\t\tDirection\t\tRemaining time"	# tableheader
 	# output lines:
@@ -229,34 +222,77 @@ while [ "${1}" != ''  ]
 do
 	[ "${1}" == "-d" ] && shift && displayed="${1}" && shift
 	[ "${1}" == "-h" ] || [ "${1}" == "--help" ] && helptext && exit 0
+	[ "${1}" == "-l" ] && shift && loop=true && loop_sec="${1}" && shift
 	[ "${1}" == "-v" ] || [ "${1}" == "--version" ] && echo $VERSION && exit 0
 	[ -n "${1}" ] && stop="${1} ${2}" && shift && shift	# 2x shift for stops containing two words
-done
 
+if [ $(( $displayed + 0 )) -eq 0 ] ; then
+	echo "Syntax error! Optionparameter not found or 0."
+	exit 0
+fi
+if [ "$(echo $loop_sec | sed '/[0-9]/!d')" == "" ] ; then
+	stop="${loop_sec} ${stop}"
+	loop_sec=30
+fi
+
+done
+#echo $loop_sec
 # ping -c 1 $URL && 
 
 # format input:
 stop="$(echo $stop | sed 's/\b./\U&/g;s/\ ,$/,/')"	# set capital letters and remove whitespace in front of comma
 let headlinelength=$headlinelength+${#stop}	# adds the length of the stopname to the headlinelength
+for (( i=1 ; i<= $headlinelength ; i++ ))
+do
+	underline="${underline}="
+done
+
+
+# get website for initial sessionid:
+wget $OPTIONS -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor"
 
 # set date and time:
 cur_date="$(date +%d.%m.%Y)"
 cur_time="$(date +%H:%M)"
-
-# get website for initial sessionid:
-wget $OPTIONS -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor"
-  
+	
 if [ "$(cat abfahrt)" == "" ]
 then
-	echo -e "\nCant reach the server!\n"
+	echo -e "\nCan't reach the server!\n"
 	clearDir
 	exit 0
 fi
 
-getSessionID
+getSessionId
 getDepartures
 processHtml
 output
 clearDir
+	
+
+while $loop
+do
+	sleep $loop_sec
+	
+	# get website for initial sessionid:
+	wget $OPTIONS -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor"
+
+	# set date and time:
+	cur_date="$(date +%d.%m.%Y)"
+	cur_time="$(date +%H:%M)"
+	
+	if [ "$(cat abfahrt)" == "" ]
+	then
+		echo -e "\nCan't reach the server!\n"
+		clearDir
+		exit 0
+	fi
+
+	getSessionId
+	getDepartures
+	processHtml
+	clear
+	output
+	clearDir	
+done
 
 exit 0
