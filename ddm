@@ -44,8 +44,9 @@ helptext()
 {
   cat <<HELP
 
-Syntax: ddm [options] [stop]
+Syntax: ddm [options] stop
 Shows the departuretimes, routes, vehicles and directions for a given stop in Dresden.
+Passing the stop becomes obsolete if you add one in the script.
 
 Options:	
 	-d num		changes the number of displayed departures (default: 15)
@@ -53,6 +54,7 @@ Options:
 	-l [sec]	get departuretimes repeatedly every 30 second or add an 
 			own interval in seconds (greater than 0)
 	-v, --version	returns the scriptversion
+
 HELP
 }
 
@@ -88,6 +90,16 @@ getDepartures()
 		exit 0
 	fi
 
+	# get correct stopname:
+	stop="$(grep \>$city, abfahrt)"
+	stop="${stop##*,}"
+	# adds the length of the stopname to the headlinelength:
+	let headlinelength=$headlinelength+${#stop}	
+	for (( i=1 ; i<= $headlinelength ; i++ ))
+	do
+		underline="${underline}="
+	done
+
 	getSessionId
 
 	# getting departuretimes again with only two vehicles
@@ -95,10 +107,10 @@ getDepartures()
 }
 
 
-clearTime() 
+clearTime()	# remove the leading 0 if present
 {
 	TMP="${1}"
-	if (test $(echo ${TMP} | cut -c 1) == "0")
+	if [ "$(echo ${TMP} | cut -c 1)" == "0" ]
 	then
 		TMP=$(echo ${TMP} | cut -c 2)
 	fi
@@ -227,7 +239,7 @@ do
 	[ -n "${1}" ] && stop="${1} ${2}" && shift && shift	# 2x shift for stops containing two words
 
 if [ $(( $displayed + 0 )) -eq 0 ] ; then
-	echo "Syntax error! Optionparameter not found or 0."
+	echo "Syntax error! Parameter not found or 0."
 	exit 0
 fi
 if [ "$(echo $loop_sec | sed '/[0-9]/!d')" == "" ] ; then
@@ -238,15 +250,6 @@ fi
 done
 #echo $loop_sec
 # ping -c 1 $URL && 
-
-# format input:
-stop="$(echo $stop | sed 's/\b./\U&/g;s/\ ,$/,/')"	# set capital letters and remove whitespace in front of comma
-let headlinelength=$headlinelength+${#stop}	# adds the length of the stopname to the headlinelength
-for (( i=1 ; i<= $headlinelength ; i++ ))
-do
-	underline="${underline}="
-done
-
 
 # get website for initial sessionid:
 wget $OPTIONS -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor"
@@ -263,7 +266,9 @@ then
 fi
 
 getSessionId
+echo "Download departuretimes..."
 getDepartures
+echo "Process information..."
 processHtml
 output
 clearDir
