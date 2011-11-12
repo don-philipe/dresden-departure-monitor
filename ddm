@@ -34,11 +34,6 @@ city="Dresden"
 stop=""
 headlinelength=50		# length of the headline without stop
 
-# possible vehicles:
-# strassenbahn,stadtbus,regionalbus,zug,sbahn,seilschwebebahn,faehre,astrufbus
-# default:
-# 	strassenbahn, stadtbus
-
 
 helptext()
 {
@@ -72,10 +67,6 @@ clearDir()
 	rm abfahrt
 	rm cookies
 	rm sessionid
-	#unset timearray
-	#unset routearray
-	#unset directionarray
-	#unset vehiclelarray
 }
 
 
@@ -165,11 +156,6 @@ processHtml()
 	route="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"
 	direction="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"
 
-	#echo $time
-	#echo $vehicle
-	#echo $route
-	#echo $direction
-
 	for (( i=1 ; i <= $displayed ; i++ ))	# loop starts with 1 for the calculation two lines below
 	do
 		timearray[$i]="$(echo ${time:$((($i-1)*6)):6})"	# ${String:Position:Laenge}
@@ -187,12 +173,6 @@ processHtml()
 		direction="$(echo $direction | sed 's/[A-ZÄÖÜ][A-ZÄÖÜa-zäöüß+\.,]*\ //')"
 		calcRemainingTime
 	done
-
-	#echo ${timearray[@]}
-	#echo ${vehiclearray[@]}
-	#echo ${routearray[@]}
-	#echo ${directionarray[@]}
-	#echo ${remaining_time[@]}
 }
 
 
@@ -217,8 +197,6 @@ output()
 		then
 			tabs="\t"
 		fi
-		#echo ${#directionarray[$i]}
-		#echo $tabs
 		echo -e "${timearray[$i]}\t${routearray[$i]}\t${vehiclearray[$i]}\t\t${directionarray[$i]}$tabs${remaining_time[$i]}"
 	done
 	echo -e "\n"
@@ -248,8 +226,6 @@ if [ "$(echo $loop_sec | sed '/[0-9]/!d')" == "" ] ; then
 fi
 
 done
-#echo $loop_sec
-# ping -c 1 $URL && 
 
 # get website for initial sessionid:
 wget $OPTIONS -O abfahrt "${URL}/de/Fahrplan/Abfahrtsmonitor"
