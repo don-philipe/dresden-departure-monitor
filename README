@@ -3,8 +3,7 @@ This is a Bashscript to get the departure time for the stops in Dresden. It is i
 What you need is a linuxsystem, the Bash and wget.
 
 Planned features:
-	* an option to run the script every X minute
 	* better erroroutput (especially at connectionproblems)
 	* more cities (currently only Dresden)
 
-If you have a stop you use regularly you can set it in the script (it's the variable "stop").
+If you have a stop you use are regularly you can set it in the script (it's the variable "stop").

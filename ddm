@@ -100,12 +100,12 @@ getDepartures()
 
 clearTime()	# remove the leading 0 if present
 {
-	TMP="${1}"
-	if [ "$(echo ${TMP} | cut -c 1)" == "0" ]
+	tmp="${1}"
+	if [ "$(echo ${tmp} | cut -c 1)" == "0" ]
 	then
-		TMP=$(echo ${TMP} | cut -c 2)
+		tmp=$(echo ${tmp} | cut -c 2)
 	fi
-	echo ${TMP}
+	echo ${tmp}
 }
 
 
@@ -151,16 +151,16 @@ processHtml()
 	endline="$(grep -n /de/Fahrplan/Abfahrtsmonitor/spaeter.do abfahrt)"
 	endline="${endline%%:*}"
 
-	time="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"	# time; left-aligned
+	times="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"
 	vehicle="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/^.*pikto_[a-z]-\?[a-z]*\.gif.*$/!d;s/^.*pikto_//g;s/\.gif.*$/ /g;s/\b./\U&/g')"
 	route="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"
 	direction="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"
 
 	for (( i=1 ; i <= $displayed ; i++ ))	# loop starts with 1 for the calculation two lines below
 	do
-		timearray[$i]="$(echo ${time:$((($i-1)*6)):6})"	# ${String:Position:Laenge}
+		timearray[$i]="$(echo ${times:$((($i-1)*6)):6})"	# ${String:Position:Length}
 		
-		if [ "$time" == "" ]
+		if [ "$times" == "" ]
 		then
 			break
 		fi
