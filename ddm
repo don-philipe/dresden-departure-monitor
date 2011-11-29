@@ -84,6 +84,15 @@ getDepartures()
 	# get correct stopname:
 	stop="$(grep \>$city, abfahrt)"
 	stop="${stop##*,}"
+	
+	# replacing &#228; -> ä ü &#246; -> ö &#223; ->
+	stop="$(echo $stop | sed 's/\&#228;/ä/g;s/\&#246;/ö/g;s/&#252;/ü/g;s/\&#223;/\ß/g')"
+	
+	#s/Ä/\&Auml;/g
+	#s/Ü/\&Uuml;/g
+	#s/Ö/\&Ouml;/g
+	
+	
 	# adds the length of the stopname to the headlinelength:
 	let headlinelength=$headlinelength+${#stop}	
 	for (( i=1 ; i<= $headlinelength ; i++ ))
@@ -151,19 +160,21 @@ processHtml()
 	endline="$(grep -n /de/Fahrplan/Abfahrtsmonitor/spaeter.do abfahrt)"
 	endline="${endline%%:*}"
 
-	times="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"
+	dep_times="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/[012][0-9]\:[0-5][0-9]/!d;s/[^0-9\:]//g')"
 	vehicle="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/^.*pikto_[a-z]-\?[a-z]*\.gif.*$/!d;s/^.*pikto_//g;s/\.gif.*$/ /g;s/\b./\U&/g')"
 	route="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/<td>[1-9][0-9]\?[0-9]\?<\/td>/!d;s/[^0-9]//g;')" #s/[1-9][^0-9]/&\ /g')"
 	direction="$(sed -n ''${startline}','${endline}'p' abfahrt | sed '/          \t.*[A-ZÄÖÜ][a-zäöüß]*.*[A-ZÄÖÜ]\?[a-zäöüß]*\t/!d;s/          \t//g;s/\ /+/g;s/\t/ /g')"
-
+	
 	for (( i=1 ; i <= $displayed ; i++ ))	# loop starts with 1 for the calculation two lines below
 	do
-		timearray[$i]="$(echo ${times:$((($i-1)*6)):6})"	# ${String:Position:Length}
-		
-		if [ "$times" == "" ]
+		if [ "$dep_times" == "" ]
 		then
 			break
 		fi
+		
+		timearray[$i]="$(echo ${dep_times:0:6})"	# ${String:Position:Length}
+		dep_times="$(echo $dep_times | sed 's/[0-9][0-9]\:[0-9][0-9]//')"	# cut the currently used time
+		
 		vehiclearray[$i]="$(echo `expr "$vehicle" : '\([A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ \)'`)"	# -\?B\? for S-Bahn
 		vehicle="$(echo $vehicle | sed 's/[A-ZÄÖÜ]-\?B\?[a-zäöüß]*\ //')"
 		routearray[$i]="$(echo `expr "$route" : '\([1-9][0-9][0-9]\|[1-9][0-9]\|[1-9]\)'`)" 	#\|S\ [1-9] - add for S-Bahn at the end

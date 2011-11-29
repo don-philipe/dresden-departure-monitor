@@ -1,6 +1,6 @@
 This is a Bashscript to get the departure time for the stops in Dresden. It is intended for those who don't want/can't use a graphical departure-monitor.
 
-What you need is a linuxsystem, the Bash and wget.
+What you need is the Bash (tested with version 4.2.20) and wget.
 
 Planned features:
 	* better erroroutput (especially at connectionproblems)
