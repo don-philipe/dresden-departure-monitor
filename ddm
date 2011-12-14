@@ -85,12 +85,12 @@ getDepartures()
 	stop="$(grep \>$city, abfahrt)"
 	stop="${stop##*,}"
 	
-	# replacing &#228; -> ä ü &#246; -> ö &#223; ->
+	# replacing umlauts
 	stop="$(echo $stop | sed 's/\&#228;/ä/g;s/\&#246;/ö/g;s/&#252;/ü/g;s/\&#223;/\ß/g')"
 	
-	#s/Ä/\&Auml;/g
-	#s/Ü/\&Uuml;/g
-	#s/Ö/\&Ouml;/g
+	#s//Ä/g
+	#s//Ü/g
+	#s//Ö/g
 	
 	
 	# adds the length of the stopname to the headlinelength:
@@ -253,6 +253,7 @@ then
 fi
 
 getSessionId
+clear
 echo "Download departuretimes..."
 getDepartures
 echo "Process information..."
@@ -278,6 +279,9 @@ do
 		clearDir
 		exit 0
 	fi
+	
+	headlinelength=50
+	underline=""
 
 	getSessionId
 	getDepartures
